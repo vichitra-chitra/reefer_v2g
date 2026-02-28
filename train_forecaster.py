@@ -174,8 +174,9 @@ def build_model(fast: bool = False) -> Pipeline:
     Gradient Boosted Trees pipeline.
     fast=True: fewer estimators, for quick testing.
     """
+    n_trees = 200 if fast else 500
     params = dict(
-        n_estimators    = 200 if fast else 500,
+        n_estimators    = n_trees,
         learning_rate   = 0.05,
         max_depth       = 5,
         subsample       = 0.8,
@@ -185,6 +186,7 @@ def build_model(fast: bool = False) -> Pipeline:
         validation_fraction = 0.1,
         n_iter_no_change    = 30,
         tol             = 1e-4,
+        verbose         = 0,           # we handle progress ourselves below
     )
     return Pipeline([
         ("scaler", RobustScaler()),
@@ -192,17 +194,82 @@ def build_model(fast: bool = False) -> Pipeline:
     ])
 
 
+def _progress_bar(current: int, total: int, loss: float,
+                   elapsed: float, bar_width: int = 35) -> str:
+    """Render a single-line ASCII progress bar."""
+    filled = int(bar_width * current / total)
+    bar    = "█" * filled + "░" * (bar_width - filled)
+    pct    = 100 * current / total
+    eta    = (elapsed / current) * (total - current) if current > 0 else 0
+    return (f"  [{bar}] {pct:5.1f}%  "
+            f"tree {current:>{len(str(total))}}/{total}  "
+            f"loss={loss:.4f}  "
+            f"ETA {int(eta//60):02d}:{int(eta%60):02d}")
+
+
 def train(df_train: pd.DataFrame,
           df_val: pd.DataFrame,
           fast: bool = False) -> Pipeline:
+    import time, sys
+
     X_train = df_train[FEATURE_COLS].values
     y_train = df_train[TARGET_COL].values
     X_val   = df_val[FEATURE_COLS].values
     y_val   = df_val[TARGET_COL].values
 
+    n_trees   = 200 if fast else 500
+    report_every = max(1, n_trees // 50)   # update bar ~50 times
+
     print(f"  Training GradientBoostingRegressor on {len(X_train):,} samples...")
-    model = build_model(fast=fast)
-    model.fit(X_train, y_train)
+    print(f"  Trees: {n_trees}  |  report every {report_every} trees")
+    print()
+
+    # ── Warm-start loop: fit one chunk at a time so we can show progress ──────
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.preprocessing import RobustScaler
+    from sklearn.pipeline import Pipeline
+
+    scaler  = RobustScaler()
+    X_scaled = scaler.fit_transform(X_train)
+
+    gbm = GradientBoostingRegressor(
+        n_estimators     = report_every,   # start with first chunk
+        learning_rate    = 0.05,
+        max_depth        = 5,
+        subsample        = 0.8,
+        min_samples_leaf = 10,
+        loss             = "huber",
+        random_state     = 42,
+        warm_start       = True,           # key: reuse existing trees
+    )
+
+    t0 = time.time()
+    trees_done = 0
+
+    while trees_done < n_trees:
+        next_target = min(trees_done + report_every, n_trees)
+        gbm.n_estimators = next_target
+        gbm.fit(X_scaled, y_train)
+        trees_done = next_target
+
+        loss = gbm.train_score_[-1]
+        elapsed = time.time() - t0
+        bar = _progress_bar(trees_done, n_trees, loss, elapsed)
+        print(f"\r{bar}", end="", flush=True)
+
+        # Early stopping: if last 30 trees improved less than tol, stop
+        if len(gbm.train_score_) >= 30:
+            recent_improvement = gbm.train_score_[-30] - gbm.train_score_[-1]
+            if recent_improvement < 1e-4:
+                print(f"\n  Early stopping at tree {trees_done} "
+                      f"(improvement < 1e-4 over last 30 trees)")
+                break
+
+    elapsed_total = time.time() - t0
+    print(f"\n  Training complete in {elapsed_total:.1f}s")
+
+    # Wrap scaler + trained gbm back into a Pipeline for compatibility
+    model = Pipeline([("scaler", scaler), ("model", gbm)])
 
     y_pred_val = model.predict(X_val)
     mae_val  = mean_absolute_error(y_val, y_pred_val)
