@@ -141,8 +141,10 @@ def split_data(df: pd.DataFrame) -> tuple:
         test  = df.iloc[i_test:]
         split_mode = "percentage (short dataset)"
     else:
-        train_end = "2023-12-31"
-        val_end   = "2024-06-30"
+        # Use pd.Timestamp with UTC-aware comparison to handle timezone-aware index
+        tz = df.index.tz
+        train_end = pd.Timestamp("2023-12-31 23:59", tz=tz)
+        val_end   = pd.Timestamp("2024-06-30 23:59", tz=tz)
         train = df[df.index <= train_end]
         val   = df[(df.index > train_end) & (df.index <= val_end)]
         test  = df[df.index > val_end]
