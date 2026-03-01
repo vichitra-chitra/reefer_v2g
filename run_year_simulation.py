@@ -332,6 +332,22 @@ def run_year(year: int,
             label="D-MPC", seed=int(date.timestamp()) % 10000,
         )
 
+        # ── Fair cost comparison ─────────────────────────────────────────
+        # Apply degradation cost equally to ALL scenarios.
+        # run_dumb() sets deg=0 but Dumb also wears the battery physically.
+        # Fair saving = (A_elec + A_deg_imputed) - (C_elec + C_deg_actual)
+        # This matches Biedenbach & Strunz (2024) TCO formulation.
+        deg_rate = v2g.deg_cost_eur_kwh
+        A_kwh_c  = float(np.sum(A.p_charge)   * v2g.dt_h)
+        C_kwh_c  = float(np.sum(C.p_charge)   * v2g.dt_h)
+        C_kwh_d  = float(np.sum(C.p_discharge) * v2g.dt_h)
+        D_kwh_c  = float(np.sum(D.p_charge)   * v2g.dt_h)
+        D_kwh_d  = float(np.sum(D.p_discharge) * v2g.dt_h)
+
+        A_fair = A.charge_cost_eur_day + A_kwh_c * deg_rate
+        C_fair = C.charge_cost_eur_day + (C_kwh_c + C_kwh_d) * deg_rate - C.v2g_revenue_eur_day
+        D_fair = D.charge_cost_eur_day + (D_kwh_c + D_kwh_d) * deg_rate - D.v2g_revenue_eur_day
+
         records.append({
             "date":               date.strftime("%Y-%m-%d"),
             "week":               date.isocalendar()[1],
@@ -344,21 +360,21 @@ def run_year(year: int,
             "buy_mean_EUR_kWh":   float(buy.mean()),
             "buy_max_EUR_kWh":    float(buy.max()),
             "v2g_max_EUR_kWh":    float(v2g_p.max()),
-            # Scenario A (baseline)
-            "A_cost_EUR":         A.cost_eur_day * fleet_size,
+            # Scenario A (baseline) — fair cost includes imputed deg
+            "A_cost_EUR":         A_fair * fleet_size,
             "A_charge_EUR":       A.charge_cost_eur_day * fleet_size,
-            # Scenario C (MILP V2G)
-            "C_cost_EUR":         C.cost_eur_day * fleet_size,
+            # Scenario C (MILP V2G) — fair cost
+            "C_cost_EUR":         C_fair * fleet_size,
             "C_v2g_rev_EUR":      C.v2g_revenue_eur_day * fleet_size,
             "C_charge_EUR":       C.charge_cost_eur_day * fleet_size,
-            "C_deg_EUR":          C.deg_cost_eur_day * fleet_size,
+            "C_deg_EUR":          (C_kwh_c + C_kwh_d) * deg_rate * fleet_size,
             "C_v2g_kwh":          C.v2g_export_kwh_day * fleet_size,
-            "C_saving_EUR":       (A.cost_eur_day - C.cost_eur_day) * fleet_size,
-            # Scenario D (MPC)
-            "D_cost_EUR":         D.cost_eur_day * fleet_size,
+            "C_saving_EUR":       (A_fair - C_fair) * fleet_size,
+            # Scenario D (MPC) — fair cost
+            "D_cost_EUR":         D_fair * fleet_size,
             "D_v2g_rev_EUR":      D.v2g_revenue_eur_day * fleet_size,
             "D_v2g_kwh":          D.v2g_export_kwh_day * fleet_size,
-            "D_saving_EUR":       (A.cost_eur_day - D.cost_eur_day) * fleet_size,
+            "D_saving_EUR":       (A_fair - D_fair) * fleet_size,
         })
 
     print(f"\n  Done. {n} days simulated.                                    ")
