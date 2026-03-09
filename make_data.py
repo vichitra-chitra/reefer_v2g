@@ -8,7 +8,7 @@ from pathlib import Path
 
 Path("data").mkdir(exist_ok=True)
 
-# ── Sheet 1: BatteryParams — S.KOe COOL 82 kWh pack ─────────────────────────
+# ── Sheet 1: BatteryParams — S.KOe COOL 70 kWh pack ─────────────────────────
 battery = pd.DataFrame({
     "Parameter": [
         "BatteryCapacity_kWh",

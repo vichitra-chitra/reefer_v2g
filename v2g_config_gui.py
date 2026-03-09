@@ -5,16 +5,16 @@ v2g_config_gui.py
 Interactive browser-based parameter editor for the S.KOe COOL V2G project.
 
 Usage:
-    python v2g_config_gui.py                # opens GUI, then runs optimisation
-    python v2g_config_gui.py --year-sim     # opens GUI, then runs year simulation
-    python v2g_config_gui.py --no-run       # just open GUI to inspect/edit values
+    python v2g_config_gui.py          # opens GUI, checks data, runs all sims
+    python v2g_config_gui.py --no-run # just open GUI to inspect/edit values
 
 How it works:
     1. Starts a local HTTP server on a free port
     2. Opens the config GUI in your default browser
-    3. You review and edit every parameter
+    3. You review and edit every parameter + choose what to run
     4. Click "Confirm & Run" — values are sent back to Python
-    5. Python saves them to a temp config JSON and runs the chosen script
+    5. Python checks data prerequisites (auto-runs fetch_smard_data.py /
+       make_data.py if needed), then runs the chosen simulations
 
 Zero extra installs — uses Python built-ins only (http.server, webbrowser, json).
 ═══════════════════════════════════════════════════════════════════════════════
@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -69,6 +70,7 @@ DEFAULTS = {
     "year":                   2024,
     "season":                 "winter",
     "price_mode":             "auto",
+    "run_mode":               "all",
 }
 
 # ── HTML page (self-contained, no CDN needed) ─────────────────────────────────
@@ -438,7 +440,7 @@ HTML = r"""<!DOCTYPE html>
     <div class="section" id="battery">
       <div class="section-header">
         <div class="section-icon" style="background:#dbeafe">&#x1F50B;</div>
-        <div><h2>Battery Pack &mdash; S.KOe COOL 82 kWh</h2><p>Schmitz Cargobull 2025 &middot; ISO 15118-2 &middot; IEC 62196</p></div>
+        <div><h2>Battery Pack &mdash; S.KOe COOL 70 kWh</h2><p>Schmitz Cargobull 2025 &middot; ISO 15118-2 &middot; IEC 62196</p></div>
       </div>
       <div class="section-body wide">
         <div class="note warn">&#x26A0;&#xFE0F; <span><b>Note:</b> E_min = UsableCap &times; SoC_min%, E_max = UsableCap &times; SoC_max%. Live values shown in top bar.</span></div>
@@ -556,14 +558,23 @@ HTML = r"""<!DOCTYPE html>
     <div class="section" id="fleet">
       <div class="section-header">
         <div class="section-icon" style="background:#e0e7ff">&#x1F69B;</div>
-        <div><h2>Fleet &amp; Year Settings</h2><p>Fleet scaling &middot; Year to simulate &middot; Season for single-day run</p></div>
+        <div><h2>Fleet &amp; Year Settings</h2><p>Fleet scaling &middot; Year to simulate &middot; What to run</p></div>
       </div>
       <div class="section-body">
-        <div class="field"><label>Fleet Size <span class="unit">trailers</span></label><input type="number" id="fleet_size" step="1" min="1" max="500"></div>
-        <div class="field"><label>Year to Simulate <span class="unit">YYYY</span></label><input type="number" id="year" step="1" min="2018" max="2030"></div>
+        <div class="field">
+          <label>Fleet Size <span class="unit">trailers</span></label>
+          <input type="number" id="fleet_size" step="1" min="1" max="500">
+        </div>
+        <div class="field">
+          <label>Year to Simulate <span class="unit">YYYY</span></label>
+          <input type="number" id="year" step="1" min="2018" max="2030">
+        </div>
         <div class="field">
           <label>Season (single-day run)</label>
-          <select id="season"><option value="winter">Winter weekday</option><option value="summer">Summer weekday</option></select>
+          <select id="season">
+            <option value="winter">Winter weekday</option>
+            <option value="summer">Summer weekday</option>
+          </select>
         </div>
         <div class="field">
           <label>Price Data Mode</label>
@@ -574,20 +585,28 @@ HTML = r"""<!DOCTYPE html>
             <option value="synthetic">Synthetic fallback</option>
           </select>
         </div>
+        <div class="field">
+          <label>What to Run</label>
+          <select id="run_mode">
+            <option value="all">All: Winter day + Summer day + Full year</option>
+            <option value="day_only">Single-day only (Winter &amp; Summer)</option>
+            <option value="year_only">Full-year simulation only</option>
+          </select>
+        </div>
         <div class="note info">&#x1F4A1; <span>Fleet scaling is linear. For &gt;25 trailers check grid transformer capacity separately.</span></div>
       </div>
     </div>
 
     <!-- ACTION BAR -->
-    <div class="section action-bar" id="run">
-      <div class="info-text">All parameters validated. Changed fields highlighted amber. Click <b>Confirm &amp; Run</b> to send to Python.</div>
+    <div class="action-bar" id="run">
+      <div class="info-text">All parameters validated. Changed fields highlighted amber. Click <b>Confirm &amp; Run</b> to check data prerequisites and start all selected simulations.</div>
       <button class="btn btn-danger" onclick="resetAll()">&#x21BA; Reset to Defaults</button>
       <button class="btn btn-secondary" onclick="exportJSON()">&#x2B07; Export JSON</button>
       <button class="btn btn-primary" onclick="confirmAndRun()">&#x25B6; Confirm &amp; Run</button>
     </div>
 
     <div class="success-card" id="successCard">
-      &#x2705; <div><strong>Configuration sent to Python.</strong><br><span id="successMsg">Optimisation running in terminal. You can close this tab.</span></div>
+      &#x2705; <div><strong>Configuration sent to Python.</strong><br><span id="successMsg">Checking data → running simulations in terminal. You can close this tab.</span></div>
     </div>
 
   </div>
@@ -597,7 +616,7 @@ HTML = r"""<!DOCTYPE html>
   <div class="spinner-card">
     <div class="spinner"></div>
     <p style="font-weight:600;color:#374151">Sending config to Python...</p>
-    <p style="font-size:0.8rem;color:#9ca3af;margin-top:6px">Optimisation will start in your terminal</p>
+    <p style="font-size:0.8rem;color:#9ca3af;margin-top:6px">Simulations will start in your terminal</p>
   </div>
 </div>
 
@@ -704,17 +723,24 @@ function exportJSON() {
 
 function confirmAndRun() {
   document.getElementById('overlay').classList.add('show');
+  const vals = collectValues();
+  const modeLabels = {
+    all:       'Checking data → Winter day + Summer day + Full year running in terminal.',
+    day_only:  'Checking data → Winter day + Summer day optimisation running in terminal.',
+    year_only: 'Checking data → Full year simulation running in terminal.',
+  };
   fetch('/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(collectValues()),
+    body: JSON.stringify(vals),
   })
   .then(r => r.json())
   .then(data => {
     document.getElementById('overlay').classList.remove('show');
     const card = document.getElementById('successCard');
     card.classList.add('show');
-    document.getElementById('successMsg').textContent = data.message || 'Configuration accepted.';
+    document.getElementById('successMsg').textContent =
+      modeLabels[vals.run_mode] || data.message || 'Configuration accepted.';
     card.scrollIntoView({ behavior: 'smooth' });
   })
   .catch(err => {
@@ -747,7 +773,7 @@ class GUIHandler(BaseHTTPRequestHandler):
         _received_config = json.loads(self.rfile.read(length))
         body = json.dumps({
             "ok": True,
-            "message": "Configuration received — optimisation starting in terminal..."
+            "message": "Configuration received — simulations starting in terminal..."
         }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -757,7 +783,6 @@ class GUIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         self.wfile.flush()
-        # Wait 2s BEFORE signalling main thread — ensures browser fully reads response
         threading.Timer(2.0, _server_done.set).start()
 
 
@@ -773,7 +798,6 @@ def launch_gui(timeout: int = 600) -> dict:
     server = HTTPServer(("127.0.0.1", port), GUIHandler)
     url    = f"http://127.0.0.1:{port}"
 
-    # Daemon=True means this thread dies automatically when main thread exits
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     print(f"\n{'='*65}")
@@ -790,10 +814,67 @@ def launch_gui(timeout: int = 600) -> dict:
     if not _server_done.wait(timeout=timeout):
         raise TimeoutError("GUI timed out — no config received.")
 
-    # DO NOT call server.shutdown() here — it would kill the socket
-    # before the browser finishes reading. The daemon thread dies on its own.
     print("\n  Config received from browser.\n")
     return _received_config.copy()
+
+
+def ensure_data(project_dir: Path) -> dict:
+    """
+    Check required data files exist.
+    Auto-runs fetch_smard_data.py and/or make_data.py if missing.
+    """
+    data_dir = project_dir / "data"
+    data_dir.mkdir(exist_ok=True)
+
+    status = {"smard": "ok", "excel": "ok"}
+    smard_raw  = data_dir / "smard_prices_raw.csv"
+    smard_proc = data_dir / "smard_prices_processed.csv"
+    excel_path = data_dir / "v2g_params.xlsx"
+    sep = "─" * 55
+
+    # ── 1. SMARD price data ───────────────────────────────────────────
+    print(f"\n  {sep}")
+    if not smard_raw.exists() and not smard_proc.exists():
+        print("  [DATA 1/2]  No SMARD price data found.")
+        fetch_script = project_dir / "fetch_smard_data.py"
+        if fetch_script.exists():
+            print("  → Launching fetch_smard_data.py (this may take a minute)...")
+            result = subprocess.run([sys.executable, str(fetch_script)], check=False)
+            if result.returncode == 0:
+                print("  ✓  SMARD data downloaded successfully.")
+                status["smard"] = "fetched"
+            else:
+                print("  ⚠  SMARD fetch failed — will fall back to synthetic prices.")
+                status["smard"] = "failed"
+        else:
+            print(f"  ⚠  fetch_smard_data.py not found in {project_dir}")
+            status["smard"] = "missing_script"
+    else:
+        found = smard_proc if smard_proc.exists() else smard_raw
+        print(f"  [DATA 1/2]  SMARD price data present: {found.name}  ✓")
+
+    # ── 2. Excel parameter file ───────────────────────────────────────
+    if not excel_path.exists():
+        print(f"  {sep}")
+        print("  [DATA 2/2]  data/v2g_params.xlsx not found.")
+        make_script = project_dir / "make_data.py"
+        if make_script.exists():
+            print("  → Running make_data.py to generate parameter file...")
+            result = subprocess.run([sys.executable, str(make_script)], check=False)
+            if result.returncode == 0:
+                print("  ✓  v2g_params.xlsx generated successfully.")
+                status["excel"] = "generated"
+            else:
+                print("  ⚠  make_data.py failed — optimisation will use built-in defaults.")
+                status["excel"] = "failed"
+        else:
+            print(f"  ⚠  make_data.py not found in {project_dir}")
+            status["excel"] = "missing_script"
+    else:
+        print(f"  [DATA 2/2]  Parameter file present: {excel_path.name}  ✓")
+
+    print(f"  {sep}\n")
+    return status
 
 
 def apply_config(cfg: dict):
@@ -819,6 +900,7 @@ def apply_config(cfg: dict):
         "fleet_size":    int(cfg["fleet_size"]),
         "year":          int(cfg["year"]),
         "price_mode":    cfg["price_mode"],
+        "run_mode":      cfg.get("run_mode", "all"),
     }
     return v2g, sim
 
@@ -834,81 +916,126 @@ def print_config_summary(cfg: dict):
     print("  " + "-"*65 + "\n")
 
 
+def _run_single_day(v2g, sim: dict, season: str):
+    """Run a full single-day optimisation for a given season."""
+    import numpy as np
+    from run_optimisation import (
+        load_prices, build_load_and_availability, load_deg_sensitivity,
+        run_dumb, run_smart_no_v2g, run_milp_day_ahead, run_mpc_day_ahead,
+        deg_sensitivity, fleet_scaling, print_report, plot_all,
+    )
+
+    print(f"\n{'='*65}")
+    print(f"  SINGLE-DAY OPTIMISATION — {season.upper()}")
+    print(f"{'='*65}\n")
+
+    tru, plugged = build_load_and_availability(v2g, dwell=sim["dwell"])
+    hours        = np.arange(v2g.n_slots) * v2g.dt_h
+    deg_values   = load_deg_sensitivity(v2g)
+    buy, v2g_p, price_source = load_prices(v2g, season=season)
+
+    print(f"  Season: {season.upper()}  |  Prices: {price_source}")
+    A = run_dumb(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"])
+    B = run_smart_no_v2g(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"])
+    C = run_milp_day_ahead(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"])
+    D = run_mpc_day_ahead(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"],
+                          forecast_noise_std=0.0, label="D - MPC (perfect)")
+    E = run_mpc_day_ahead(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"],
+                          forecast_noise_std=v2g.mpc_price_noise_std,
+                          label="E - MPC (noisy)", seed=42)
+
+    results  = {"A": A, "B": B, "C": C, "D": D, "E": E}
+    deg_df   = deg_sensitivity(v2g, buy, v2g_p, tru, plugged, deg_values,
+                               sim["soc_init_pct"], sim["soc_final_pct"])
+    fleet_df = fleet_scaling(C, D, fleet_sizes=[1, 5, 10, 25, 50])
+
+    print_report(results, fleet_df, deg_df, season=season, price_source=price_source)
+    out = f"results_{season}_gui.png"
+    plot_all(hours, A, B, C, D, E, deg_df, fleet_df, season=season, out=out)
+    print(f"\n  Chart saved → {out}\n")
+
+
+def _run_year_sim(v2g, sim: dict):
+    """Run a full-year simulation."""
+    print(f"\n{'='*65}")
+    print(f"  FULL-YEAR SIMULATION — {sim['year']}")
+    print(f"{'='*65}\n")
+
+    from run_year_simulation import (
+        run_year, print_annual_summary,
+        plot_year_summary, plot_weekly_heatmap,
+        PriceLoader,
+    )
+    loader = PriceLoader(mode=sim["price_mode"])
+    df = run_year(
+        year          = sim["year"],
+        v2g           = v2g,
+        loader        = loader,
+        fleet_size    = sim["fleet_size"],
+        soc_init_pct  = sim["soc_init_pct"],
+        soc_final_pct = sim["soc_final_pct"],
+        dwell         = sim["dwell"],
+    )
+    out_csv = Path("data") / f"year_simulation_{sim['year']}_gui.csv"
+    df.to_csv(out_csv, index=False)
+    print_annual_summary(df, sim["year"], sim["fleet_size"])
+    plot_year_summary(df, sim["year"], sim["fleet_size"])
+    plot_weekly_heatmap(df, sim["year"])
+    print(f"\n  Year results saved → {out_csv}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="V2G GUI — opens browser config editor, then runs optimisation"
+        description="V2G GUI — opens browser config editor, checks data, then runs simulations"
     )
-    parser.add_argument("--year-sim", action="store_true",
-                        help="Run full year simulation (default: single-day)")
-    parser.add_argument("--no-run",   action="store_true",
+    parser.add_argument("--no-run",  action="store_true",
                         help="GUI only — do not run any script after")
-    parser.add_argument("--timeout",  type=int, default=600,
+    parser.add_argument("--timeout", type=int, default=600,
                         help="Browser wait timeout in seconds (default: 600)")
     args = parser.parse_args()
 
     cfg = launch_gui(timeout=args.timeout)
     print_config_summary(cfg)
 
-    Path("data").mkdir(exist_ok=True)
-    cfg_path = Path("data") / "last_gui_config.json"
+    project_dir = Path(__file__).parent
+    (project_dir / "data").mkdir(exist_ok=True)
+    cfg_path = project_dir / "data" / "last_gui_config.json"
     cfg_path.write_text(json.dumps(cfg, indent=2))
-    print(f"  Config saved -> {cfg_path}\n")
+    print(f"  Config saved → {cfg_path}\n")
 
     if args.no_run:
         print("  --no-run flag set. Done.\n")
         return
 
+    # ── Step 1: Ensure data prerequisites ─────────────────────────────
+    print("\n" + "="*65)
+    print("  DATA PREREQUISITE CHECK")
+    print("="*65)
+    sys.path.insert(0, str(project_dir))
+    ensure_data(project_dir)
+
+    # ── Step 2: Build parameter objects ───────────────────────────────
     v2g, sim = apply_config(cfg)
+    run_mode = sim["run_mode"]
 
-    if args.year_sim:
-        print("  Starting full year simulation...\n")
-        from run_year_simulation import (run_year, print_annual_summary,
-                                         plot_year_summary, plot_weekly_heatmap,
-                                         PriceLoader)
-        loader = PriceLoader(mode=sim["price_mode"])
-        df = run_year(year=sim["year"], v2g=v2g, loader=loader,
-                      fleet_size=sim["fleet_size"],
-                      soc_init_pct=sim["soc_init_pct"],
-                      soc_final_pct=sim["soc_final_pct"],
-                      dwell=sim["dwell"])
-        df.to_csv("data/year_simulation_results.csv", index=False)
-        print_annual_summary(df, sim["year"], sim["fleet_size"])
-        plot_year_summary(df, sim["year"], sim["fleet_size"])
-        plot_weekly_heatmap(df, sim["year"])
+    label_map = {
+        "all":       "Winter day  +  Summer day  +  Full year",
+        "day_only":  "Winter day  +  Summer day",
+        "year_only": f"Full year ({sim['year']})",
+    }
+    print(f"  Run mode: {run_mode}  →  {label_map.get(run_mode, run_mode)}\n")
 
-    else:
-        print("  Starting single-day optimisation...\n")
-        import numpy as np
-        from run_optimisation import (
-            load_prices, build_load_and_availability, load_deg_sensitivity,
-            run_dumb, run_smart_no_v2g, run_milp_day_ahead, run_mpc_day_ahead,
-            deg_sensitivity, fleet_scaling, print_report, plot_all,
-        )
-        tru, plugged = build_load_and_availability(v2g, dwell=sim["dwell"])
-        hours        = np.arange(v2g.n_slots) * v2g.dt_h
-        deg_values   = load_deg_sensitivity(v2g)
-        buy, v2g_p, price_source = load_prices(v2g, season=sim["season"])
+    # ── Step 3: Run selected simulations ──────────────────────────────
+    if run_mode in ("all", "day_only"):
+        _run_single_day(v2g, sim, "winter")
+        _run_single_day(v2g, sim, "summer")
 
-        print(f"  Season: {sim['season'].upper()}  |  Prices: {price_source}")
-        A = run_dumb(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"])
-        B = run_smart_no_v2g(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"])
-        C = run_milp_day_ahead(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"])
-        D = run_mpc_day_ahead(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"],
-                              forecast_noise_std=0.0, label="D - MPC (perfect)")
-        E = run_mpc_day_ahead(v2g, buy, v2g_p, tru, plugged, sim["soc_init_pct"], sim["soc_final_pct"],
-                              forecast_noise_std=v2g.mpc_price_noise_std,
-                              label="E - MPC (noisy)", seed=42)
+    if run_mode in ("all", "year_only"):
+        _run_year_sim(v2g, sim)
 
-        results  = {"A": A, "B": B, "C": C, "D": D, "E": E}
-        deg_df   = deg_sensitivity(v2g, buy, v2g_p, tru, plugged, deg_values,
-                                   sim["soc_init_pct"], sim["soc_final_pct"])
-        fleet_df = fleet_scaling(C, D, fleet_sizes=[1, 5, 10, 25, 50])
-
-        print_report(results, fleet_df, deg_df,
-                     season=sim["season"], price_source=price_source)
-        out = f"results_{sim['season']}_gui.png"
-        plot_all(hours, A, B, C, D, E, deg_df, fleet_df, season=sim["season"], out=out)
-        print(f"\n  Chart saved -> {out}\n  Done.\n")
+    print(f"\n{'='*65}")
+    print("  ALL SIMULATIONS COMPLETE")
+    print(f"{'='*65}\n")
 
 
 if __name__ == "__main__":

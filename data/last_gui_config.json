@@ -28,5 +28,6 @@
   "fleet_size": 1,
   "year": 2024,
   "season": "winter",
-  "price_mode": "auto"
+  "price_mode": "auto",
+  "run_mode": "all"
 }

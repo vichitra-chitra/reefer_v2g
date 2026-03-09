@@ -1,33 +1,4 @@
 #!/usr/bin/env python3
-"""
-run_optimisation.py
-═══════════════════════════════════════════════════════════════════════════════
-S.KOe COOL – Reefer Trailer V2G Optimisation
-Standalone script: MILP + Day-Ahead MPC – no Streamlit needed.
-
-Run:   python run_optimisation.py
-Deps:  pip install numpy scipy matplotlib pandas openpyxl
-
-Data:  Place  data/v2g_params.xlsx  in the same folder (run make_data.py once
-       to generate it, or replace with real EPEX data — see SECTION 2).
-
-Scenarios:
-  A – Dumb              Charge at max power whenever plugged in. No optimisation.
-  B – Smart (no V2G)    Day-ahead MILP: buy cheap, no discharge. Shows scheduling value.
-  C – MILP Day-Ahead    Full optimal: buy cheap, sell peak (V2G). Perfect information.
-  D – MPC perfect       Receding-horizon MILP, full remaining day, no forecast error.
-  E – MPC noisy         Same as D + σ=0.012 EUR/kWh intraday noise (Liu 2023).
-
-Control Architecture (two-layer, Biedenbach & Strunz 2024):
-─────────────────────────────────────────────────────────────────────────────
-  Layer 1 – Day-Ahead MILP:  full 24h schedule solved at 00:00
-  Layer 2 – Receding MPC:    re-solves over full remaining day every 15 min
-═══════════════════════════════════════════════════════════════════════════════
-References:
-  Biedenbach & Strunz (2024) Multi-Use Depot Optimization, WEVJ 15, 84
-  Agora Verkehrswende (2025) Bidirektionales Laden
-  Liu et al. (2023) Stochastic MPC for EV charging under uncertainty
-"""
 
 from __future__ import annotations
 import warnings
@@ -40,14 +11,11 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List
 from pathlib import Path
 
-# ═══════════════════════════════════════════════════════════════════════════════
+
 #  SECTION 1 – PARAMETERS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class V2GParams:
-    """Battery + grid parameters for one reefer trailer.
-    Defaults match the S.KOe COOL 82 kWh pack (Schmitz Cargobull, 2025)."""
     battery_capacity_kWh:  float = 70.0
     usable_capacity_kWh:   float = 60.0     # usable window (SoC 20-95 %)
     soc_min_pct:           float = 20.0     # cold-chain floor
