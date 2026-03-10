@@ -1,27 +1,4 @@
 #!/usr/bin/env python3
-"""
-run_year_simulation.py
-═══════════════════════════════════════════════════════════════════════════════
-Full-year (52-week) V2G optimisation simulation for the S.KOe COOL reefer.
-
-Modes:
-  --year 2024           Simulate all of 2024 using real SMARD prices
-  --year 2026           Simulate 2026 using ML-forecasted prices
-  --forecast-only       Use ML model for all price inputs (no real data needed)
-
-For each of the 365 days:
-  1. Load that day's real/forecast price (96 × 15-min slots)
-  2. Run Scenarios A (dumb) and C (MILP V2G) — the most important comparison
-     (plus D-MPC with forecast noise for the ML scenario)
-  3. Record daily cost, revenue, SoC profile, V2G export
-
-Output:
-  data/year_simulation_results.csv  — daily results table
-  results_year_summary.png          — 4-panel publication chart
-  results_weekly_heatmap.png        — 52-week P&L heatmap
-
-═══════════════════════════════════════════════════════════════════════════════
-"""
 
 from __future__ import annotations
 import argparse
