@@ -99,57 +99,51 @@ def generate_abbreviation_legend(out="abbreviation_legend.png"):
             transform=ax.transAxes)
 
     scenarios = [
-        ("A – Dumb",         "#AAAAAA",
-         "Uncontrolled charging. Charges at full power (P_c_max)\n"
-         "the moment truck arrives. No price awareness. No V2G.\n"
-         "Baseline / worst case."),
-        ("B – Smart\n(no V2G)", "#2196F3",
-         "Price-optimal charging only. Day-ahead MILP shifts\n"
-         "charging to cheapest slots but never discharges.\n"
-         "Minimal battery wear."),
-        ("C – MILP\nDay-Ahead", "#00BCD4",
-         "Full 24h MILP solved once at 00:00 using complete\n"
-         "day-ahead price forecast. Charges cheap, discharges\n"
-         "at peak. Theoretical optimum (perfect information)."),
-        ("D – MPC\nPerfect", "#FF7700",
-         "Receding-Horizon Model Predictive Control using full\n"
-         "remaining day as horizon. Re-solves MILP at every\n"
-         "15-min slot. No forecast noise. Near-optimal."),
+        ("A – Dumb",            "#AAAAAA",
+         "Charges at full power on arrival.\nNo price awareness. No V2G. Baseline."),
+        ("B – Smart (no V2G)",  "#2196F3",
+         "MILP shifts charging to cheapest slots.\nNever discharges. Minimal battery wear."),
+        ("C – MILP Day-Ahead",  "#00BCD4",
+         "Full 24h MILP at 00:00, perfect forecast.\nCharges cheap, discharges at peak."),
+        ("D – MPC Perfect",     "#FF7700",
+         "Receding-horizon MPC, re-solves every\n15-min slot. No noise. Near-optimal."),
     ]
 
-    y = 0.90
+    y = 0.91
     for sc_label, col, desc in scenarios:
-        patch = mpatches.FancyBboxPatch((0.02, y-0.015), 0.06, 0.035,
+        patch = mpatches.FancyBboxPatch((0.02, y-0.012), 0.06, 0.030,
                                         boxstyle="round,pad=0.005",
                                         facecolor=col, edgecolor="white",
                                         transform=ax.transAxes, clip_on=False)
         ax.add_patch(patch)
-        ax.text(0.11, y+0.008, sc_label, ha="left", va="top", fontsize=9,
+        ax.text(0.11, y+0.005, sc_label, ha="left", va="top", fontsize=8.5,
                 fontweight="bold", color="#1B5E20", transform=ax.transAxes)
         for i, line in enumerate(desc.split("\n")):
-            ax.text(0.11, y - 0.014 - i*0.020, line, ha="left", va="top",
+            ax.text(0.11, y - 0.018 - i*0.018, line, ha="left", va="top",
                     fontsize=7.5, color="#333333", transform=ax.transAxes)
-        y -= 0.16
+        y -= 0.13   # reduced from 0.16 → tighter but no overlap
 
-    ax.text(0.5, 0.37, "COST / REVENUE TERMS", ha="center", va="top",
+    # y is now dynamic — cost section starts right below last scenario
+    y -= 0.04
+    ax.text(0.5, y, "COST / REVENUE TERMS", ha="center", va="top",
             fontsize=12, fontweight="bold", color="#1B5E20",
             transform=ax.transAxes)
+    y -= 0.06
 
     cost_terms = [
-        ("Net Cost (€/day)",        "= Charge cost − V2G revenue + Degradation cost"),
-        ("Charge Cost (€/day)",     "= Σ_t  buy[t] · P_c[t] · dt"),
-        ("V2G Revenue (€/day)",     "= Σ_t  v2g[t] · P_d[t] · dt"),
-        ("Degradation Cost (€/day)","= Σ_t  deg · (P_c[t]+P_d[t]) · dt"),
-        ("Savings vs A (€/day)",    "= Net Cost(A) − Net Cost(scenario)"),
-        ("Annual Savings (€/yr)",   "= Savings/day × 365"),
+        ("Net Cost (€/day)",         "= Charge cost − V2G revenue + Deg cost"),
+        ("Charge Cost (€/day)",      "= Σ_t  buy[t] · P_c[t] · dt"),
+        ("V2G Revenue (€/day)",      "= Σ_t  v2g[t] · P_d[t] · dt"),
+        ("Degradation Cost (€/day)", "= Σ_t  deg · (P_c[t]+P_d[t]) · dt"),
+        ("Savings vs A (€/day)",     "= Net Cost(A) − Net Cost(scenario)"),
+        ("Annual Savings (€/yr)",    "= Savings/day × 365"),
     ]
-    y = 0.31
     for term, formula in cost_terms:
-        ax.text(0.03, y, f"• {term}", ha="left", va="top", fontsize=8.5,
+        ax.text(0.03, y, f"• {term}", ha="left", va="top", fontsize=8.0,
                 fontweight="bold", color="#C62828", transform=ax.transAxes)
-        ax.text(0.03, y-0.022, f"    {formula}", ha="left", va="top",
-                fontsize=7.8, color="#333333", transform=ax.transAxes)
-        y -= 0.055
+        ax.text(0.03, y-0.020, f"    {formula}", ha="left", va="top",
+                fontsize=7.5, color="#333333", transform=ax.transAxes)
+        y -= 0.050
 
     # ── Column 3: Seasons, Dwell Modes, Solver & Hardware ─────────────────
     ax = axes[2]
@@ -237,6 +231,320 @@ def generate_abbreviation_legend(out="abbreviation_legend.png"):
     plt.close()
     print(f"  Abbreviation legend saved → {out}")
 
+
+def generate_equations_card(out="equations_reference.png"):
+    """
+    Generates a detailed reference PNG explaining the MILP and MPC
+    core equations, constraints, and algorithm flow.
+    """
+    fig = plt.figure(figsize=(20, 14))
+    fig.patch.set_facecolor("#F0F4F8")
+    fig.suptitle(
+        "V2G Optimisation — Core Equations: MILP & Receding-Horizon MPC",
+        fontsize=16, fontweight="bold", color="#0D1B2A", y=0.98
+    )
+
+    gs = GridSpec(2, 3, figure=fig, hspace=0.45, wspace=0.35,
+                  top=0.93, bottom=0.04, left=0.03, right=0.97)
+
+    # ── Box style helper ───────────────────────────────────────────────────
+    BOX = dict(boxstyle="round,pad=0.5", facecolor="white",
+               edgecolor="#90A4AE", linewidth=1.2)
+    HEAD_BOX = dict(boxstyle="round,pad=0.4", facecolor="#1A237E",
+                    edgecolor="#1A237E")
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Panel 1 (top-left): MILP Objective Function
+    # ══════════════════════════════════════════════════════════════════════
+    ax = fig.add_subplot(gs[0, 0])
+    ax.set_facecolor("#E8EAF6"); ax.axis("off")
+    ax.text(0.5, 0.97, "① MILP — Objective Function", ha="center", va="top",
+            fontsize=11, fontweight="bold", color="white",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#1A237E"))
+
+    lines = [
+        (0.5, 0.86, "min  J  =  Σ_t  [ C_buy(t) + C_deg(t) − R_v2g(t) ] · Δt",
+         10.5, "bold", "#B71C1C"),
+        (0.5, 0.76, "where:", 9, "bold", "#1A237E"),
+        (0.07, 0.68, "C_buy(t)  =  buy[t] · P_c[t]",
+         9, "normal", "#212121"),
+        (0.60, 0.68, "← grid import cost at slot t",
+         8.5, "italic", "#555555"),
+        (0.07, 0.59, "R_v2g(t)  =  v2g[t] · P_d[t]",
+         9, "normal", "#212121"),
+        (0.60, 0.59, "← V2G revenue at slot t",
+         8.5, "italic", "#555555"),
+        (0.07, 0.50, "C_deg(t)  =  deg · (P_c[t] + P_d[t])",
+         9, "normal", "#212121"),
+        (0.60, 0.50, "← battery wear cost",
+         8.5, "italic", "#555555"),
+        (0.07, 0.38, "buy[t]    day-ahead spot price  (€/kWh)",
+         8.5, "normal", "#333333"),
+        (0.07, 0.30, "v2g[t]    V2G sell price  (€/kWh)",
+         8.5, "normal", "#333333"),
+        (0.07, 0.22, "deg       degradation cost  (€/kWh cycled)",
+         8.5, "normal", "#333333"),
+        (0.07, 0.14, "Δt        time step = 0.25 h  (15 min)",
+         8.5, "normal", "#333333"),
+        (0.07, 0.06, "t         slot index  0 … 95  (96 slots = 24 h)",
+         8.5, "normal", "#333333"),
+    ]
+    for x, y, txt, fs, fw, col in lines:
+        ax.text(x, y, txt, ha="left" if x < 0.5 else "left",
+                va="top", fontsize=fs, fontstyle="italic" if fw == "italic" else "normal",
+                fontweight="bold" if fw == "bold" else "normal",
+                color=col, transform=ax.transAxes,
+                bbox=BOX if (y in [0.86]) else None)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Panel 2 (top-middle): MILP Constraints
+    # ══════════════════════════════════════════════════════════════════════
+    ax = fig.add_subplot(gs[0, 1])
+    ax.set_facecolor("#E8F5E9"); ax.axis("off")
+    ax.text(0.5, 0.97, "② MILP — Constraints", ha="center", va="top",
+            fontsize=11, fontweight="bold", color="white",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#1B5E20"))
+
+    constraints = [
+        ("(i)  SoC Dynamics  [energy balance]", "#1B5E20", 0.88),
+        ("e[t] = e[t−1]  +  η_c · P_c[t] · Δt", "#B71C1C", 0.80),
+        ("            −  (1/η_d) · P_d[t] · Δt  −  TRU[t] · Δt", "#B71C1C", 0.73),
+        ("      with  e[0]  initialised to  E_init", "#555555", 0.66),
+        ("(ii)  Power Bounds  [hardware limits]", "#1B5E20", 0.57),
+        ("0  ≤  P_c[t]  ≤  p_c_max · plugged[t]", "#333333", 0.50),
+        ("0  ≤  P_d[t]  ≤  p_d_max · plugged[t]", "#333333", 0.43),
+        ("      plugged[t] ∈ {0,1}  (availability flag)", "#555555", 0.37),
+        ("(iii)  SoC Bounds  [battery safety]", "#1B5E20", 0.28),
+        ("E_min  ≤  e[t]  ≤  E_max   ∀ t", "#333333", 0.21),
+        ("(iv)  Mutex  [no simultaneous charge+discharge]", "#1B5E20", 0.13),
+        ("P_c[t] + P_d[t]  ≤  max(p_c_max, p_d_max)", "#333333", 0.06),
+    ]
+    for txt, col, y in constraints:
+        fw = "bold" if txt.startswith("(") else "normal"
+        ax.text(0.05, y, txt, ha="left", va="top",
+                fontsize=8.8, fontweight=fw, color=col,
+                transform=ax.transAxes)
+
+    # departure SoC constraint box
+    ax.text(0.5, -0.02,
+            "(v)  Departure SoC:  e[N−1]  ≥  E_fin",
+            ha="center", va="top", fontsize=8.8,
+            fontweight="bold", color="#B71C1C",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3",
+                      facecolor="#FFEBEE", edgecolor="#B71C1C"))
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Panel 3 (top-right): Variable Layout (solver internals)
+    # ══════════════════════════════════════════════════════════════════════
+    ax = fig.add_subplot(gs[0, 2])
+    ax.set_facecolor("#FFF3E0"); ax.axis("off")
+    ax.text(0.5, 0.97, "③ MILP — Variable Layout (HiGHS solver)",
+            ha="center", va="top", fontsize=11, fontweight="bold",
+            color="white", transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#E65100"))
+
+    ax.text(0.5, 0.87,
+            "Decision vector  x  of length  3W:",
+            ha="center", va="top", fontsize=9, fontweight="bold",
+            color="#E65100", transform=ax.transAxes)
+
+    segments = [
+        ("#BBDEFB", "x[0 … W−1]\n= P_c(0) … P_c(W−1)\nCharging power\n(kW per slot)"),
+        ("#C8E6C9", "x[W … 2W−1]\n= P_d(0) … P_d(W−1)\nDischarge power\n(kW per slot)"),
+        ("#FFCCBC", "x[2W … 3W−1]\n= e(0) … e(W−1)\nSoC trajectory\n(kWh per slot)"),
+    ]
+    for i, (fc, txt) in enumerate(segments):
+        x0 = 0.04 + i * 0.33
+        rect = mpatches.FancyBboxPatch((x0, 0.52), 0.28, 0.26,
+                                        boxstyle="round,pad=0.01",
+                                        facecolor=fc, edgecolor="#78909C",
+                                        transform=ax.transAxes, clip_on=False)
+        ax.add_patch(rect)
+        ax.text(x0 + 0.14, 0.65, txt, ha="center", va="center",
+                fontsize=7.8, color="#212121", transform=ax.transAxes)
+
+    ax.text(0.5, 0.47, "W = remaining slots in horizon  (W = 96 at t=0)",
+            ha="center", va="top", fontsize=8.5, color="#555555",
+            transform=ax.transAxes)
+
+    solver_notes = [
+        "• Solver: scipy HiGHS  (scipy.optimize.milp)",
+        "• Constraint matrix A: sparse (lil_matrix → csc_matrix)",
+        "• Bounds object: lb = 0, ub = hardware limits",
+        "• Time limit: 60 s per window",
+        "• Fallback: greedy rule-based if solver fails",
+        "• Cost vector c: [buy+deg, −v2g+deg, 0] × Δt",
+    ]
+    y = 0.38
+    for note in solver_notes:
+        ax.text(0.04, y, note, ha="left", va="top", fontsize=8.2,
+                color="#333333", transform=ax.transAxes)
+        y -= 0.055
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Panel 4 (bottom-left): MPC Algorithm Flow
+    # ══════════════════════════════════════════════════════════════════════
+    ax = fig.add_subplot(gs[1, 0])
+    ax.set_facecolor("#EDE7F6"); ax.axis("off")
+    ax.text(0.5, 0.97, "④ MPC — Receding-Horizon Algorithm",
+            ha="center", va="top", fontsize=11, fontweight="bold",
+            color="white", transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#4A148C"))
+
+    steps = [
+        ("STEP 1 — FORECAST", "#4A148C",
+         "Horizon = full remaining day  [t … 95]\n"
+         "buy_fc = buy[t:],   v2g_fc = v2g[t:]\n"
+         "Window size W = 96 − t  (shrinks each slot)"),
+        ("STEP 2 — SOLVE MILP", "#4A148C",
+         "Run MILP over W remaining slots\n"
+         "E_init = current real SoC\n"
+         "E_fin  = departure target (always at slot 95)"),
+        ("STEP 3 — EXECUTE FIRST ACTION", "#4A148C",
+         "Apply only P_c[0] and P_d[0]\n"
+         "Discard the rest of the optimal schedule\n"
+         "Mutex: if both > 0 → pick more profitable"),
+        ("STEP 4 — ADVANCE SoC", "#4A148C",
+         "soc += P_c·η_c·Δt − P_d/η_d·Δt − TRU·Δt\n"
+         "soc  = clip(soc, E_min, E_max)\n"
+         "t → t+1,  repeat until t = 95"),
+    ]
+
+    y = 0.87
+    for title, tc, body in steps:
+        ax.text(0.05, y, title, ha="left", va="top", fontsize=8.8,
+                fontweight="bold", color=tc, transform=ax.transAxes)
+        for i, line in enumerate(body.split("\n")):
+            ax.text(0.07, y - 0.055 - i*0.045, line, ha="left", va="top",
+                    fontsize=8.0, color="#212121", transform=ax.transAxes)
+        y -= 0.21
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Panel 5 (bottom-middle): MILP vs MPC comparison
+    # ══════════════════════════════════════════════════════════════════════
+    ax = fig.add_subplot(gs[1, 1])
+    ax.set_facecolor("#E0F2F1"); ax.axis("off")
+    ax.text(0.5, 0.97, "⑤ MILP Day-Ahead vs MPC — Key Differences",
+            ha="center", va="top", fontsize=11, fontweight="bold",
+            color="white", transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#004D40"))
+
+    headers = ["Property", "C — MILP", "D — MPC"]
+    rows = [
+        ["Solved at",        "Once at t=0",         "Every slot t"],
+        ["Horizon W",        "96 slots (fixed)",    "96−t (shrinking)"],
+        ["Price info",       "Full day known",      "Full day known"],
+        ["SoC update",       "Open-loop",           "Closed-loop"],
+        ["Re-optimises",     "Never",               "Every 15 min"],
+        ["Disturbance corr.","None",                "Yes (real SoC)"],
+        ["Compute cost",     "1× per day",          "96× per day"],
+        ["Result quality",   "Global optimum",      "Near-optimal"],
+    ]
+
+    col_x  = [0.03, 0.38, 0.70]
+    col_bg = ["#B2DFDB", "#B2EBF2", "#FFE0B2"]
+    y = 0.84
+    # Header row
+    for cx, hdr, bg in zip(col_x, headers, col_bg):
+        ax.text(cx, y, hdr, ha="left", va="top", fontsize=8.8,
+                fontweight="bold", color="#004D40",
+                transform=ax.transAxes,
+                bbox=dict(boxstyle="square,pad=0.2",
+                          facecolor=bg, edgecolor="#90A4AE"))
+    y -= 0.09
+    for row in rows:
+        for cx, val, bg in zip(col_x, row, col_bg):
+            fc = "#F5F5F5" if row.index(val) == 0 else bg
+            ax.text(cx, y, val, ha="left", va="top", fontsize=8.0,
+                    color="#212121", transform=ax.transAxes)
+        y -= 0.075
+
+    ax.text(0.5, 0.02,
+            "In practice: MPC ≈ MILP because full-day horizon\n"
+            "eliminates the myopic planning problem.",
+            ha="center", va="bottom", fontsize=8.0,
+            fontstyle="italic", color="#004D40",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3",
+                      facecolor="#E0F7FA", edgecolor="#004D40"))
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Panel 6 (bottom-right): SoC Dynamics & Efficiency Chain
+    # ══════════════════════════════════════════════════════════════════════
+    ax = fig.add_subplot(gs[1, 2])
+    ax.set_facecolor("#FCE4EC"); ax.axis("off")
+    ax.text(0.5, 0.97, "⑥ SoC Dynamics & Efficiency Chain",
+            ha="center", va="top", fontsize=11, fontweight="bold",
+            color="white", transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="#880E4F"))
+
+    ax.text(0.5, 0.88,
+            "e[t]  =  e[t−1]  +  η_c·P_c[t]·Δt  −  P_d[t]/η_d·Δt  −  TRU[t]·Δt",
+            ha="center", va="top", fontsize=9, fontweight="bold",
+            color="#B71C1C", transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.3",
+                      facecolor="#FFEBEE", edgecolor="#B71C1C"))
+
+    flow_items = [
+        ("GRID", "#1565C0", 0.10, 0.73),
+        ("P_c · η_c  →", "#1565C0", 0.30, 0.73),
+        ("BATTERY\ne[t] kWh", "#2E7D32", 0.50, 0.73),
+        ("→  P_d / η_d", "#C62828", 0.70, 0.73),
+        ("GRID\n(V2G)", "#C62828", 0.87, 0.73),
+    ]
+    for txt, col, x, y_pos in flow_items:
+        is_box = txt in ["GRID", "BATTERY\ne[t] kWh", "GRID\n(V2G)"]
+        ax.text(x, y_pos, txt, ha="center", va="center",
+                fontsize=8.5, fontweight="bold", color=col,
+                transform=ax.transAxes,
+                bbox=dict(boxstyle="round,pad=0.3",
+                          facecolor="#E3F2FD" if "GRID" in txt else "#E8F5E9",
+                          edgecolor=col) if is_box else None)
+
+    # TRU drain arrow
+    ax.annotate("", xy=(0.50, 0.60), xytext=(0.50, 0.68),
+                xycoords="axes fraction",
+                arrowprops=dict(arrowstyle="->", color="#AA0000", lw=1.5))
+    ax.text(0.55, 0.63, "TRU drain\n−TRU[t]·Δt", ha="left", va="center",
+            fontsize=7.8, color="#AA0000", transform=ax.transAxes)
+
+    params_title = "Parameters"
+    ax.text(0.5, 0.53, params_title, ha="center", va="top",
+            fontsize=9, fontweight="bold", color="#880E4F",
+            transform=ax.transAxes)
+
+    params = [
+        ("η_c = 0.92",   "Charge efficiency (8% lost to heat on AC→DC)"),
+        ("η_d = 0.92",   "Discharge efficiency (8% lost on DC→AC invert)"),
+        ("E_min = 12 kWh","SoC floor = 20% × 60 kWh usable"),
+        ("E_max = 57 kWh","SoC ceiling = 95% × 60 kWh usable"),
+        ("TRU ≈ 2.8–4 kW","Refrigeration load (sinusoidal over 24h)"),
+        ("Δt = 0.25 h",  "15-min slot = 1/4 hour"),
+    ]
+    y = 0.46
+    for param, desc in params:
+        ax.text(0.03, y, param, ha="left", va="top", fontsize=8.2,
+                fontweight="bold", color="#880E4F", transform=ax.transAxes)
+        ax.text(0.28, y, desc, ha="left", va="top", fontsize=8.0,
+                color="#333333", transform=ax.transAxes)
+        y -= 0.063
+
+    ax.text(0.5, 0.03,
+            "Round-trip efficiency = η_c × η_d = 0.92² ≈ 84.6%\n"
+            "Every kWh discharged costs 1/0.92 ≈ 1.087 kWh from battery",
+            ha="center", va="bottom", fontsize=7.8,
+            fontstyle="italic", color="#555555",
+            transform=ax.transAxes,
+            bbox=dict(boxstyle="round,pad=0.2",
+                      facecolor="#FCE4EC", edgecolor="#880E4F"))
+
+    plt.savefig(out, dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close()
+    print(f"  Equations reference card saved → {out}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  SECTION 1 – PARAMETERS
@@ -406,12 +714,15 @@ def build_load_and_availability(v2g: "V2GParams", dwell: str = "Extended") -> tu
     """
     N = v2g.n_slots
     h = np.arange(N) * v2g.dt_h
-    tru = 2.8 + 1.2 * np.sin(2 * np.pi * np.arange(N) / N + np.pi)
+    tru = np.zeros(N)   # TRU off when stationary at depot
     if dwell == "Weekend":
         plugged = np.ones(N)
     elif dwell == "NightOnly":
         plugged = ((h >= 21) | (h < 7)).astype(float)
-    else:
+    elif dwell == "DayTrip":
+        # Trailer departs 07:00, returns 17:00 → plugged 17:00-07:00
+        plugged = ((h >= 17) | (h < 7)).astype(float)
+    else:  # Extended (default)
         plugged = ((h >= 21) | (h < 7) | ((h >= 12) & (h < 18))).astype(float)
     return tru, plugged
 
@@ -547,7 +858,7 @@ def run_smart_no_v2g(v2g, buy, v2g_p, tru, plugged,
                      soc_init_pct=45.0, soc_final_pct=80.0):
     """Day-ahead MILP: price-optimal charging, V2G discharge blocked. deg=0."""
     E_init = v2g.usable_capacity_kWh * soc_init_pct  / 100.0
-    E_fin  = v2g.usable_capacity_kWh * soc_final_pct / 100.0
+    E_fin  = min(v2g.usable_capacity_kWh * soc_final_pct / 100.0, v2g.E_max)
     P_c, P_d, e, ok = _solve_milp_window(
         v2g, buy, np.zeros_like(v2g_p), tru, plugged, E_init, E_fin, deg=0.0)
     if not ok:
@@ -566,7 +877,7 @@ def run_milp_day_ahead(v2g, buy, v2g_p, tru, plugged,
     """Full 24h MILP solved once at 00:00. Perfect information, global optimum."""
     deg    = v2g.deg_cost_eur_kwh
     E_init = v2g.usable_capacity_kWh * soc_init_pct  / 100.0
-    E_fin  = v2g.usable_capacity_kWh * soc_final_pct / 100.0
+    E_fin  = min(v2g.usable_capacity_kWh * soc_final_pct / 100.0, v2g.E_max)
     P_c, P_d, e, ok = _solve_milp_window(
         v2g, buy, v2g_p, tru, plugged, E_init, E_fin, deg)
     if not ok:
@@ -593,7 +904,7 @@ def run_mpc_day_ahead(v2g, buy_day_ahead, v2g_day_ahead, tru, plugged,
     """
     deg    = v2g.deg_cost_eur_kwh
     E_init = v2g.usable_capacity_kWh * soc_init_pct  / 100.0
-    E_fin  = v2g.usable_capacity_kWh * soc_final_pct / 100.0
+    E_fin  = min(v2g.usable_capacity_kWh * soc_final_pct / 100.0, v2g.E_max)
     N, dt  = v2g.n_slots, v2g.dt_h
 
     P_c_all = np.zeros(N); P_d_all = np.zeros(N); e_all = np.zeros(N)
@@ -700,137 +1011,224 @@ COL = {"dumb": "#AAAAAA", "smart": "#2196F3", "milp": "#00BCD4",
 
 
 def plot_all(hours, A, B, C, D, deg_df, season="winter", out="results.png"):
-    fig, axes = plt.subplots(2, 3, figsize=(19, 10))
+    """
+    Layout:
+      Left column (4 rows) : one subplot per scenario, P_c + P_d + price overlay
+      Right column (2×2)   : SoC | V2G discharge | deg sensitivity | KPI table
+    All time axes rolled to start at 17:00 (trailer arrival).
+    """
+    # ── Roll display to 17:00 ─────────────────────────────────────────────
+    ROLL = 68   # slot 68 = 17:00
+    N    = len(hours)
+
+    def roll_arr(a): return np.concatenate([a[ROLL:], a[:ROLL]])
+
+    def roll_r(r):
+        return V2GResult(
+            scenario=r.scenario,
+            p_charge=roll_arr(r.p_charge), p_discharge=roll_arr(r.p_discharge),
+            soc=roll_arr(r.soc),
+            cost_eur_day=r.cost_eur_day, v2g_revenue_eur_day=r.v2g_revenue_eur_day,
+            v2g_export_kwh_day=r.v2g_export_kwh_day,
+            charge_cost_eur_day=r.charge_cost_eur_day,
+            deg_cost_eur_day=r.deg_cost_eur_day,
+            price_buy=roll_arr(r.price_buy), price_v2g=roll_arr(r.price_v2g),
+            plugged=roll_arr(r.plugged),   tru_load=roll_arr(r.tru_load))
+
+    rA, rB, rC, rD = roll_r(A), roll_r(B), roll_r(C), roll_r(D)
+    results_rolled  = [rA, rB, rC, rD]
+
+    # x-axis: 17.00 … 40.75  (24+ = next-day hours)
+    hours_disp = np.concatenate([hours[ROLL:], hours[:ROLL] + 24.0])
+    tick_pos   = np.arange(17, 42, 2, dtype=float)
+    tick_lbls  = [f"{int(h % 24):02d}:00" for h in tick_pos]
+
+    labels_full = ["A – Dumb (uncontrolled)", "B – Smart (no V2G)",
+                   "C – MILP Day-Ahead",      "D – MPC Perfect"]
+    colors_list = [COL["dumb"], COL["smart"], COL["milp"], COL["mpc"]]
+
+    # ── Figure & GridSpec ─────────────────────────────────────────────────
+    fig = plt.figure(figsize=(22, 16))
+    gs  = GridSpec(4, 3, figure=fig,
+                   width_ratios=[1.8, 1.5, 1.5],
+                   hspace=0.08, wspace=0.38,
+                   top=0.93, bottom=0.07, left=0.06, right=0.97)
     fig.suptitle(
-        f"S.KOe COOL  –  MILP + MPC V2G Optimisation  ({season})",
-        fontsize=13, fontweight="bold")
+        f"S.KOe COOL  –  MILP + MPC V2G Optimisation  ({season})\n"
+        f"Time axis: 17:00 arrival  →  next day 17:00  (DayTrip dwell)",
+        fontsize=12, fontweight="bold")
 
-    # (1) Charging schedules
-    ax = axes[0, 0]
-    ax.fill_between(hours, A.p_charge, step="pre", color=COL["dumb"],  alpha=0.55, label="A – Dumb")
-    ax.fill_between(hours, B.p_charge, step="pre", color=COL["smart"], alpha=0.55, label="B – Smart (no V2G)")
-    ax.fill_between(hours, C.p_charge, step="pre", color=COL["milp"],  alpha=0.45, label="C – MILP Day-Ahead")
-    ax.fill_between(hours, D.p_charge, step="pre", color=COL["mpc"],   alpha=0.35, label="D – MPC Perfect")
-    ax.step(hours, A.tru_load, where="post", color=COL["tru"], lw=1.2, ls="--", label="TRU load")
-    ax.set_title("(1) P_c  –  Charging Power Schedule")
-    ax.set_xlabel("Hour of day"); ax.set_ylabel("P_c  (kW)")
-    ax.legend(fontsize=7); ax.grid(True, alpha=0.3); ax.set_xlim(0, 24)
+    y_max = max(r.p_charge.max() for r in results_rolled) * 1.18 or 25
 
-    # (2) V2G discharge vs price
-    ax = axes[0, 1]; ax2 = ax.twinx()
-    w = 0.22
-    ax.bar(hours - w/2, C.p_discharge, width=w, color=COL["milp"], alpha=0.8, label="C – MILP V2G (P_d)")
-    ax.bar(hours + w/2, D.p_discharge, width=w, color=COL["mpc"],  alpha=0.7, label="D – MPC V2G (P_d)")
-    ax2.step(hours, C.price_v2g, where="post", color=COL["price"], lw=1.8, label="V2G price (€/kWh)")
-    ax.set_title("(2) P_d  –  V2G Discharge vs Price")
-    ax.set_xlabel("Hour of day"); ax.set_ylabel("P_d  (kW)")
-    ax2.set_ylabel("Price  (€/kWh)", color=COL["price"])
-    ax.legend(loc="upper left", fontsize=7); ax2.legend(loc="upper right", fontsize=7)
-    ax.grid(True, alpha=0.3); ax.set_xlim(0, 24)
+    # ── Left column: 4 individual scenario plots ──────────────────────────
+    for i, (r, lbl, col) in enumerate(zip(results_rolled, labels_full, colors_list)):
+        ax  = fig.add_subplot(gs[i, 0])
+        ax2 = ax.twinx()
 
-    # (3) SoC traces
-    ax = axes[0, 2]
-    ax.plot(hours, A.soc, color=COL["dumb"],  lw=2.0, ls="-",  label="A – Dumb")
-    ax.plot(hours, B.soc, color=COL["smart"], lw=2.0, ls="-",  label="B – Smart")
-    ax.plot(hours, C.soc, color=COL["milp"],  lw=2.0, ls="-",  label="C – MILP")
-    ax.plot(hours, D.soc, color=COL["mpc"],   lw=1.8, ls="--", label="D – MPC")
-    ax.fill_between(hours, C.plugged * 4 + 57, 57, alpha=0.08, color="green", label="Plugged window")
-    ax.axhline(v2g_global.E_min, color="red",   ls=":", lw=1, alpha=0.6, label=f"E_min ({v2g_global.E_min:.0f} kWh)")
-    ax.axhline(v2g_global.E_max, color="navy",  ls=":", lw=1, alpha=0.6, label=f"E_max ({v2g_global.E_max:.0f} kWh)")
-    ax.set_title("(3) SoC  –  Battery State of Charge"); ax.set_xlabel("Hour"); ax.set_ylabel("E  (kWh)")
-    ax.legend(fontsize=7); ax.grid(True, alpha=0.3); ax.set_xlim(0, 24)
+        # Price dashed line (right axis)
+        ax2.step(hours_disp, r.price_v2g * 1000, where="post",
+                 color=COL["price"], lw=1.0, alpha=0.55, ls="--")
+        ax2.set_ylabel("€/MWh", fontsize=6, color=COL["price"])
+        ax2.tick_params(axis="y", labelsize=6, colors=COL["price"])
 
-    # (4) Daily cost comparison bar
-    ax = axes[1, 0]
-    labels = ["A\nDumb", "B\nSmart\n(no V2G)", "C\nMILP\nDay-Ahead", "D\nMPC\nPerfect"]
-    costs  = [A.cost_eur_day, B.cost_eur_day, C.cost_eur_day, D.cost_eur_day]
-    colors = [COL["dumb"], COL["smart"], COL["milp"], COL["mpc"]]
-    ref    = A.cost_eur_day
-    bars   = ax.bar(labels, costs, color=colors, alpha=0.85, edgecolor="black")
-    for bar, v in zip(bars, costs):
-        ax.text(bar.get_x() + bar.get_width()/2, max(v, 0) + 0.008,
-                f"€{v:.3f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
-    for bar, v in zip(bars[1:], costs[1:]):
-        saving = ref - v
-        col = "darkgreen" if saving > 0 else "red"
-        ax.text(bar.get_x() + bar.get_width()/2, min(v, 0) - 0.02,
-                f"{saving:+.3f}/day", ha="center", fontsize=7.5, color=col)
-    ax.axhline(ref, color=COL["dumb"], ls="--", lw=1, alpha=0.5, label="Dumb baseline")
-    ax.set_title("(4) Net Daily Cost  [+ = cost,  − = revenue]")
-    ax.set_ylabel("Net cost  (€/day)"); ax.grid(True, alpha=0.3, axis="y")
-    ax.legend(fontsize=7)
+        # Charging power fill
+        ax.fill_between(hours_disp, r.p_charge, step="pre",
+                        color=col, alpha=0.80)
+        # V2G discharge fill (negative)
+        if r.p_discharge.max() > 0.01:
+            ax.fill_between(hours_disp, -r.p_discharge, step="pre",
+                            color="#E53935", alpha=0.70)
+            ax.text(0.98, 0.05, "▼ P_d V2G", transform=ax.transAxes,
+                    fontsize=6.5, color="#E53935", ha="right", va="bottom")
 
-    # (5) Degradation sensitivity
-    ax = axes[1, 1]; ax2 = ax.twinx()
+        # Plug-in / plug-out vertical markers
+        plug = r.plugged
+        for t in range(1, N):
+            if plug[t] > 0.5 > plug[t-1]:
+                ax.axvline(hours_disp[t], color="green", lw=1.2, ls="--", alpha=0.6)
+                ax.text(hours_disp[t]+0.1, y_max*0.88, "IN",
+                        fontsize=6, color="green", va="top")
+            elif plug[t] < 0.5 < plug[t-1]:
+                ax.axvline(hours_disp[t], color="red", lw=1.2, ls="--", alpha=0.6)
+                ax.text(hours_disp[t]+0.1, y_max*0.88, "OUT",
+                        fontsize=6, color="red", va="top")
+
+        ax.axhline(0, color="black", lw=0.6)
+        ax.set_xlim(17, 41)
+        ax.set_ylim(-v2g_global.p_d_max * 1.15, y_max)
+        ax.tick_params(axis="y", labelsize=7)
+        ax.grid(True, alpha=0.25)
+
+        # Label inside plot
+        ax.text(0.01, 0.95, f"({i+1}) {lbl}",
+                transform=ax.transAxes, fontsize=8.5,
+                fontweight="bold", color=col, va="top")
+        ax.set_ylabel("kW", fontsize=7)
+
+        # X-axis only on bottom plot
+        if i < 3:
+            ax.set_xticklabels([])
+        else:
+            ax.set_xticks(tick_pos)
+            ax.set_xticklabels(tick_lbls, fontsize=7, rotation=35, ha="right")
+            ax.set_xlabel("Hour  (17:00 = trailer arrival at depot)", fontsize=8)
+
+    # ── Right top-left (rows 0-1): SoC ────────────────────────────────────
+    ax = fig.add_subplot(gs[0:2, 1])
+    for r, lbl, col, ls in zip(results_rolled, labels_full, colors_list,
+                               ["-", "-", "-", "--"]):
+        ax.plot(hours_disp, r.soc, color=col, lw=2, ls=ls,
+                label=lbl.split("–")[0].strip())
+    ax.axhline(v2g_global.E_min, color="red",  ls=":", lw=1.2,
+               label=f"E_min = {v2g_global.E_min:.0f} kWh")
+    ax.axhline(v2g_global.E_max, color="navy", ls=":", lw=1.2,
+               label=f"E_max = {v2g_global.E_max:.0f} kWh")
+    ax.axvline(31, color="grey", ls=":", lw=0.8, alpha=0.5)   # midnight
+    ax.text(31.1, v2g_global.E_min + 1, "midnight", fontsize=7,
+            color="grey", va="bottom")
+    ax.set_xticks(tick_pos); ax.set_xticklabels(tick_lbls, fontsize=7, rotation=35, ha="right")
+    ax.set_xlim(17, 41)
+    ax.set_title("(5) SoC — Battery State of Charge\n(17:00 → next day 17:00)",
+                 fontsize=9, fontweight="bold")
+    ax.set_ylabel("E  (kWh)"); ax.set_xlabel("Hour")
+    ax.legend(fontsize=7.5, loc="lower right"); ax.grid(True, alpha=0.3)
+
+    # ── Right top-right (rows 0-1): V2G discharge vs price ────────────────
+    ax  = fig.add_subplot(gs[0:2, 2])
+    ax2 = ax.twinx()
+    w   = 0.18
+    ax.bar(hours_disp - w/2, rC.p_discharge, width=w,
+           color=COL["milp"], alpha=0.85, label="C – MILP P_d")
+    ax.bar(hours_disp + w/2, rD.p_discharge, width=w,
+           color=COL["mpc"],  alpha=0.75, label="D – MPC P_d")
+    ax2.step(hours_disp, rC.price_v2g * 1000, where="post",
+             color=COL["price"], lw=1.8, label="V2G price (€/MWh)")
+    ax.set_xticks(tick_pos); ax.set_xticklabels(tick_lbls, fontsize=7, rotation=35, ha="right")
+    ax.set_xlim(17, 41)
+    ax.set_title("(6) P_d — V2G Discharge vs Price\n(C–MILP vs D–MPC)",
+                 fontsize=9, fontweight="bold")
+    ax.set_ylabel("P_d  (kW)"); ax.set_xlabel("Hour")
+    ax2.set_ylabel("Price  (€/MWh)", color=COL["price"], fontsize=8)
+    ax.legend(loc="upper left", fontsize=7.5)
+    ax2.legend(loc="upper right", fontsize=7.5)
+    ax.grid(True, alpha=0.3)
+
+    # ── Right bottom-left (rows 2-3): deg sensitivity ─────────────────────
+    ax  = fig.add_subplot(gs[2:4, 1])
+    ax2 = ax.twinx()
     ax.plot(deg_df["DegCost_EUR_kWh"], deg_df["NetCost_EUR_day"],
             "o-", color=COL["milp"], lw=2, label="Net Cost (€/day)")
     ax.plot(deg_df["DegCost_EUR_kWh"], deg_df["V2G_Rev_EUR_day"],
             "s--", color=COL["mpc"], lw=2, label="V2G Revenue (€/day)")
     ax2.bar(deg_df["DegCost_EUR_kWh"], deg_df["V2G_kWh_day"],
-            width=0.008, color=COL["mpc"], alpha=0.3, label="V2G export (kWh/day)")
+            width=0.008, color=COL["mpc"], alpha=0.22, label="V2G kWh/day")
     tipping = deg_df[deg_df["V2G_active"]]["DegCost_EUR_kWh"].max()
     if not np.isnan(tipping):
         ax.axvline(tipping, color="red", ls=":", lw=1.5,
-                   label=f"V2G cutoff ≈ {tipping:.3f} €/kWh")
-    ax.axvline(v2g_global.deg_cost_eur_kwh, color="black", ls="--", lw=1,
-               label=f"Active deg = {v2g_global.deg_cost_eur_kwh:.2f}")
-    ax.set_title("(5) Degradation (deg) Sensitivity")
+                   label=f"V2G cutoff ≈ {tipping:.3f}")
+    ax.axvline(v2g_global.deg_cost_eur_kwh, color="black", ls="--", lw=1.2,
+               label=f"Active deg = {v2g_global.deg_cost_eur_kwh:.3f}")
+    ax.set_title("(7) Degradation (deg) Sensitivity",
+                 fontsize=9, fontweight="bold")
     ax.set_xlabel("deg  (€/kWh cycled)"); ax.set_ylabel("€/day")
-    ax2.set_ylabel("V2G export  (kWh/day)", color=COL["mpc"])
-    ax.legend(loc="upper left", fontsize=7); ax2.legend(loc="upper right", fontsize=7)
+    ax2.set_ylabel("V2G export  (kWh/day)", color=COL["mpc"], fontsize=8)
+    ax.legend(loc="upper left", fontsize=7.5)
+    ax2.legend(loc="upper right", fontsize=7.5)
     ax.grid(True, alpha=0.3)
 
-    # (6) Summary results table
-    ax = axes[1, 2]; ax.axis("off")
+    # ── Right bottom-right (rows 2-3): KPI table ──────────────────────────
+    ax = fig.add_subplot(gs[2:4, 2])
+    ax.axis("off")
+    ref = A.cost_eur_day
     table_data = [
-        ["Metric", "A – Dumb", "B – Smart", "C – MILP", "D – MPC"],
-        ["Net cost (€/day)",
-         f"{A.cost_eur_day:.3f}", f"{B.cost_eur_day:.3f}",
-         f"{C.cost_eur_day:.3f}", f"{D.cost_eur_day:.3f}"],
-        ["Charge cost (€/day)",
+        ["Metric",                 "A\nDumb",   "B\nSmart",  "C\nMILP",   "D\nMPC"],
+        ["Net cost\n(€/day)",
+         f"{A.cost_eur_day:.3f}",  f"{B.cost_eur_day:.3f}",
+         f"{C.cost_eur_day:.3f}",  f"{D.cost_eur_day:.3f}"],
+        ["Charge cost\n(€/day)",
          f"{A.charge_cost_eur_day:.3f}", f"{B.charge_cost_eur_day:.3f}",
          f"{C.charge_cost_eur_day:.3f}", f"{D.charge_cost_eur_day:.3f}"],
-        ["V2G revenue (€/day)",
+        ["V2G revenue\n(€/day)",
          f"{A.v2g_revenue_eur_day:.3f}", f"{B.v2g_revenue_eur_day:.3f}",
          f"{C.v2g_revenue_eur_day:.3f}", f"{D.v2g_revenue_eur_day:.3f}"],
-        ["deg cost (€/day)",
+        ["deg cost\n(€/day)",
          f"{A.deg_cost_eur_day:.3f}", f"{B.deg_cost_eur_day:.3f}",
          f"{C.deg_cost_eur_day:.3f}", f"{D.deg_cost_eur_day:.3f}"],
-        ["V2G export (kWh/day)",
+        ["V2G export\n(kWh/day)",
          f"{A.v2g_export_kwh_day:.2f}", f"{B.v2g_export_kwh_day:.2f}",
          f"{C.v2g_export_kwh_day:.2f}", f"{D.v2g_export_kwh_day:.2f}"],
-        ["Savings vs A (€/day)",
-         "—",
-         f"{ref - B.cost_eur_day:+.3f}",
-         f"{ref - C.cost_eur_day:+.3f}",
-         f"{ref - D.cost_eur_day:+.3f}"],
-        ["Annual savings vs A (€/yr)",
-         "—",
-         f"{(ref-B.cost_eur_day)*365:+,.0f}",
+        ["Savings vs A\n(€/day)",
+         "—", f"{ref-B.cost_eur_day:+.3f}",
+         f"{ref-C.cost_eur_day:+.3f}", f"{ref-D.cost_eur_day:+.3f}"],
+        ["Annual savings\n(€/yr)",
+         "—", f"{(ref-B.cost_eur_day)*365:+,.0f}",
          f"{(ref-C.cost_eur_day)*365:+,.0f}",
          f"{(ref-D.cost_eur_day)*365:+,.0f}"],
     ]
     tbl = ax.table(cellText=table_data[1:], colLabels=table_data[0],
                    loc="center", cellLoc="center")
-    tbl.auto_set_font_size(False); tbl.set_fontsize(8)
-    tbl.scale(1.0, 1.6)
-    for (r, c), cell in tbl.get_celld().items():
-        if r == 0:
-            cell.set_facecolor("#263238"); cell.set_text_props(color="white", fontweight="bold")
-        elif r % 2 == 0:
-            cell.set_facecolor("#ECEFF1")
-        cell.set_edgecolor("#90A4AE")
-    col_colors = ["#EEEEEE", "#BBDEFB", "#B2EBF2", "#FFE0B2"]
-    for c_idx, bg in enumerate(col_colors):
-        for r_idx in range(1, len(table_data)):
-            tbl[(r_idx, c_idx+1)].set_facecolor(bg)
-    ax.set_title("(6) KPI Summary Table", fontsize=10, fontweight="bold", pad=14)
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(8.5)
+    tbl.scale(1.1, 2.15)
 
-    plt.tight_layout()
+    col_colors = ["#EEEEEE", "#BBDEFB", "#B2EBF2", "#FFE0B2"]
+    for (r, c), cell in tbl.get_celld().items():
+        cell.set_edgecolor("#90A4AE")
+        if r == 0:
+            cell.set_facecolor("#263238")
+            cell.set_text_props(color="white", fontweight="bold", fontsize=8)
+        elif c == 0:
+            cell.set_facecolor("#ECEFF1")
+            cell.set_text_props(fontweight="bold", fontsize=8)
+            cell.set_width(0.38)   # wider Metric column
+        else:
+            cell.set_facecolor(col_colors[c - 1])
+
+    ax.set_title("(8) KPI Summary Table", fontsize=9, fontweight="bold", pad=14)
+
     plt.savefig(out, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"  Chart saved → {out}")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  SECTION 10 – 8 ADDITIONAL ANALYTICAL GRAPHS
@@ -1104,19 +1502,33 @@ def main():
             print(f"  → Degradation cost: €{v2g.deg_cost_eur_kwh:.3f}/kWh")
     print("─"*55)
 
-    soc_init_pct  = 45.0
-    soc_final_pct = 80.0
+    print("\n" + "─"*55)
+    print("  ARRIVAL STATE OF CHARGE")
+    soc_input = input("  Enter trailer arrival SoC % (e.g. 45): ").strip()
+    try:
+        soc_init_pct = float(soc_input)
+        assert 20.0 <= soc_init_pct <= 95.0
+    except:
+        soc_init_pct = 45.0
+        print(f"  → Invalid input. Using default 45%")
+    print(f"  → Arrival SoC: {soc_init_pct:.0f}%   Departure SoC: 100% (fixed)")
+    print("─"*55)
+    soc_final_pct = 100.0   # Always depart fully charged
+
     deg_values    = load_deg_sensitivity(v2g)
     hours         = np.arange(v2g.n_slots) * v2g.dt_h
 
     print("\n  Generating abbreviation legend …")
     generate_abbreviation_legend("abbreviation_legend.png")
 
+    print("\n  Generating equations reference card …")
+    generate_equations_card("equations_reference.png")
+
     all_season_results: dict = {}
 
     DAY_TYPES = [
-        ("winter",         "Extended", 130, "Winter weekday  (Mon–Fri, Oct–Mar)"),
-        ("summer",         "Extended", 131, "Summer weekday  (Mon–Fri, Apr–Sep)"),
+        ("winter",         "DayTrip", 130, "Winter weekday  (Mon–Fri, Oct–Mar)"),
+        ("summer",         "DayTrip", 131, "Summer weekday  (Mon–Fri, Apr–Sep)"),
         ("winter_weekend", "Weekend",   52, "Winter weekend  (Sat–Sun, Oct–Mar)"),
         ("summer_weekend", "Weekend",   52, "Summer weekend  (Sat–Sun, Apr–Sep)"),
     ]
@@ -1132,6 +1544,14 @@ def main():
 
         tru, plugged = build_load_and_availability(v2g, dwell=dwell_type)
         buy, v2g_p, price_source = load_prices_from_csv(csv_path, v2g, season=season)
+
+        # Roll arrays so simulation starts at 17:00 (trailer arrival)
+        if dwell_type == "DayTrip":
+            ROLL = 68   # 17:00 × 4 slots/hour
+            buy     = np.roll(buy,     -ROLL)
+            v2g_p   = np.roll(v2g_p,   -ROLL)
+            tru     = np.roll(tru,     -ROLL)
+            plugged = np.roll(plugged, -ROLL)
 
         print(f"  Prices: {price_source}")
         print(f"  Buy: €{buy.min()*1000:.1f}–{buy.max()*1000:.1f} €/MWh  |  "
