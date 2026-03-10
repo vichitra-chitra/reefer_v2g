@@ -314,11 +314,29 @@ def _load_smard_csv(csv_path: str) -> pd.DataFrame:
     if "df" in _PRICE_CACHE:
         return _PRICE_CACHE["df"]
 
-    df = pd.read_csv(csv_path, sep=";", encoding="utf-8-sig")
+def _load_smard_csv(csv_path: str) -> pd.DataFrame:
+    global _PRICE_CACHE
+    if "df" in _PRICE_CACHE:
+        return _PRICE_CACHE["df"]
+
+    # Auto-detect encoding and separator
+    df = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+        try:
+            df = pd.read_csv(csv_path, sep=";", encoding=enc)
+            if len(df.columns) > 1:
+                break
+            df = pd.read_csv(csv_path, sep=",", encoding=enc)
+            if len(df.columns) > 1:
+                break
+        except Exception:
+            continue
+    if df is None or df.empty or len(df.columns) < 2:
+        raise ValueError(f"Could not read CSV at {csv_path} — check the file exists and is a valid SMARD export.")
+
     col = "Germany/Luxembourg [€/MWh] Original resolutions"
     df = df[["Start date", col]].copy()
     df.columns = ["datetime_str", "price_eur_mwh"]
-
     df["datetime"] = pd.to_datetime(df["datetime_str"],
                                     format="%b %d, %Y %I:%M %p",
                                     errors="coerce")
