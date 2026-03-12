@@ -93,7 +93,7 @@ CONFIG = _cleanup(
             },
         },
         "Python Information": {
-            "path": r"/tmp/build-env-jif3r6om/bin/python",
+            "path": r"/tmp/build-env-1qb6pwdj/bin/python",
             "version": "3.12",
         },
         "SIMD Extensions": {

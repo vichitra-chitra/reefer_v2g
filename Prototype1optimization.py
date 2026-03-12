@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""
-S.KOe COOL — Day-Ahead MILP + Receding-Horizon MPC V2G Optimisation
-Schmitz Cargobull AG | 2025
-Based on: Biedenbach & Strunz (2024), Agora Verkehrswende (2025)
-
-Electricity prices: SMARD.de 2025 real DE/LU 15-min day-ahead spot data
-"""
 
 from __future__ import annotations
 import warnings
